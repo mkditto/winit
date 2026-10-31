@@ -83,18 +83,76 @@ pub trait EventLoopBuilderExtWayland {
     fn with_any_thread(&mut self, any_thread: bool) -> &mut Self;
 }
 
+/// Which of a window's edges the compositor has tiled against something.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct TiledEdges {
+    /// The window's left edge is tiled against the screen or another window.
+    pub left: bool,
+    /// The window's right edge is tiled against the screen or another window.
+    pub right: bool,
+    /// The window's top edge is tiled against the screen or another window.
+    pub top: bool,
+    /// The window's bottom edge is tiled against the screen or another window.
+    pub bottom: bool,
+}
+
+impl TiledEdges {
+    /// No edge is tiled. The window floats free.
+    pub const NONE: Self = Self { left: false, right: false, top: false, bottom: false };
+
+    /// Whether any edge is tiled.
+    pub fn any(self) -> bool {
+        self.left || self.right || self.top || self.bottom
+    }
+}
+
 /// Additional methods on [`Window`] that are specific to Wayland.
 ///
 /// [`Window`]: crate::window::Window
 pub trait WindowExtWayland {
     /// Returns `xdg_toplevel` of the window or [`None`] if the window is X11 window.
     fn xdg_toplevel(&self) -> Option<NonNull<c_void>>;
+
+    /// Gets the window's tiled state, that is which of its edges the compositor
+    /// has snapped against the screen or other windows (GNOME Super+Left /
+    /// Super+Right / drag to a screen edge) without maximizing it.
+    ///
+    /// Client-side decorations need this per edge. A tiled edge goes edge to edge
+    /// like a maximized one, so the shadow margin must go, while the free edges
+    /// keep their resize handles, which the compositor still honors.
+    ///
+    /// Returns [`None`] if the window is not a Wayland window.
+    fn tiled_edges(&self) -> Option<TiledEdges>;
+
+    /// Sets the window's content margin, that is how far the app's own content
+    /// sits inside the window's surface, the space where it draws decorations of
+    /// its own, like the shadow margin around a client-side-decorated window.
+    ///
+    /// The margin becomes the xdg-shell window geometry, in logical points, so the
+    /// compositor positions, snaps and tiles against the content instead of the
+    /// whole surface. Applied on every resize, taking effect at the next configure
+    /// ack.
+    ///
+    /// A no-op if the window is not a Wayland window.
+    fn set_content_margin(&self, left: u32, top: u32, right: u32, bottom: u32);
 }
 
 impl WindowExtWayland for dyn CoreWindow + '_ {
     #[inline]
     fn xdg_toplevel(&self) -> Option<NonNull<c_void>> {
         self.cast_ref::<Window>()?.xdg_toplevel()
+    }
+
+    #[inline]
+    fn tiled_edges(&self) -> Option<TiledEdges> {
+        Some(self.cast_ref::<Window>()?.tiled_edges())
+    }
+
+    #[inline]
+    fn set_content_margin(&self, left: u32, top: u32, right: u32, bottom: u32) {
+        if let Some(window) = self.cast_ref::<Window>() {
+            window.set_content_margin(left, top, right, bottom)
+        }
     }
 }
 
