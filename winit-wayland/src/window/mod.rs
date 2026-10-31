@@ -14,6 +14,7 @@ use sctk::shell::xdg::window::{Window as SctkWindow, WindowDecorations};
 use tracing::warn;
 use winit_core::cursor::Cursor;
 use winit_core::error::{CreateWindowError, NotSupportedError, RequestError};
+use winit_core::event::WindowEvent;
 use winit_core::event_loop::AsyncRequestSerial;
 use winit_core::monitor::{Fullscreen, MonitorHandle as CoreMonitorHandle};
 use winit_core::window::{
@@ -25,7 +26,7 @@ use winit_core::window::{
 use super::ActiveEventLoop;
 use super::types::xdg_activation::XdgActivationTokenData;
 use crate::window::common::WindowCommon;
-use crate::{WindowAttributesWayland, output};
+use crate::{TiledEdges, WindowAttributesWayland, output};
 pub(crate) mod state;
 pub use state::WindowState;
 pub(crate) mod handles;
@@ -45,9 +46,7 @@ pub struct Window {
     /// Unlike `Popup`, which only ever holds a `Weak` (via `common.state`) so that a
     /// compositor-initiated destroy can drop the state out from under a still-live handle, a
     /// top-level `Window` has no equivalent unilateral server-side destruction to react to --
-    /// it can only be closed by the application dropping this handle. This field is never read;
-    /// it exists solely to uphold that guarantee.
-    #[expect(dead_code, reason = "kept alive for its Drop, not read")]
+    /// it can only be closed by the application dropping this handle.
     window_state: Arc<Mutex<WindowState>>,
 
     common: WindowCommon,
@@ -252,6 +251,39 @@ impl Window {
     #[inline]
     pub fn surface(&self) -> &WlSurface {
         self.window.wl_surface()
+    }
+
+    /// Which of the window's edges the compositor tiled against something, from
+    /// the `tiled_*` states of the last xdg configure. Client-side decorations
+    /// use this to drop the shadow along the tiled edges while keeping resize
+    /// handles on the rest.
+    #[inline]
+    pub fn tiled_edges(&self) -> TiledEdges {
+        self.window_state.lock().unwrap().tiled_edges()
+    }
+
+    /// Sets the app's content margin. See the same method on `WindowState`
+    /// for details.
+    /// A margin change resizes the window from the app's thread and no configure
+    /// follows it, so the new surface size is relayed to the app as a
+    /// `SurfaceResized`, like a compositor resize would be. Without it the app
+    /// would keep rendering at the old size while the compositor stretches its
+    /// framebuffer into the new one.
+    #[inline]
+    pub fn set_content_margin(&self, left: u32, top: u32, right: u32, bottom: u32) {
+        let new_size = self
+            .window_state
+            .lock()
+            .unwrap()
+            .set_content_margin(left, top, right, bottom);
+        if let Some(new_size) = new_size {
+            let scale_factor = self.window_state.lock().unwrap().scale_factor();
+            let physical_size = crate::logical_to_physical_rounded(new_size, scale_factor);
+            self.common
+                .handles
+                .push_window_event(WindowEvent::SurfaceResized(physical_size), self.common.id());
+            self.common.request_redraw();
+        }
     }
 }
 

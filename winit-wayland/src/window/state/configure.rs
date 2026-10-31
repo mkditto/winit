@@ -110,19 +110,34 @@ impl WindowState {
             // Configure the window states.
             frame.update_state(configure.state);
 
-            match configure.new_size {
-                (Some(width), Some(height)) => {
-                    let (width, height) = frame.subtract_borders(width, height);
-                    let width = width.map(|w| w.get()).unwrap_or(1);
-                    let height = height.map(|h| h.get()).unwrap_or(1);
-                    ((width, height).into(), false)
-                },
-                (..) if stateless => (self.stateless_size, true),
-                _ => (self.size, true),
+            // A hidden frame is like no frame at all. The app decorates itself,
+            // so the configure sizes its content and the surface adds the
+            // margin back.
+            if frame.is_hidden() {
+                match configure.new_size {
+                    (Some(width), Some(height)) => {
+                        (self.content_to_surface(width.get(), height.get()), false)
+                    },
+                    (..) if stateless => (self.stateless_size, true),
+                    _ => (self.size, true),
+                }
+            } else {
+                match configure.new_size {
+                    (Some(width), Some(height)) => {
+                        let (width, height) = frame.subtract_borders(width, height);
+                        let width = width.map(|w| w.get()).unwrap_or(1);
+                        let height = height.map(|h| h.get()).unwrap_or(1);
+                        ((width, height).into(), false)
+                    },
+                    (..) if stateless => (self.stateless_size, true),
+                    _ => (self.size, true),
+                }
             }
         } else {
             match configure.new_size {
-                (Some(width), Some(height)) => ((width.get(), height.get()).into(), false),
+                (Some(width), Some(height)) => {
+                    (self.content_to_surface(width.get(), height.get()), false)
+                },
                 _ if stateless => (self.stateless_size, true),
                 _ => (self.size, true),
             }
